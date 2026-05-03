@@ -11,7 +11,13 @@ class LoadBalancer:
         self.connections = defaultdict(int)
 
     def forward_request(self, request):
-        return self.master.handle_request(request)
+            print(f"[LB] Received request: {request}")
+
+            response = self.master.handle_request(request)
+
+            print(f"[LB] Response returned to client: {response}")
+
+            return response
 
     def get_worker(self, request=None):
         with self.lock:
