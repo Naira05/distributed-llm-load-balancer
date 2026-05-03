@@ -2,16 +2,18 @@ import threading
 from collections import defaultdict
 
 class LoadBalancer:
-    def __init__(self, workers, master, strategy="round_robin"):
+    def __init__(self, workers, strategy="round_robin"):
         self.workers = workers
-        self.master = master
         self.strategy = strategy
         self.lock = threading.Lock()
         self.index = 0
         self.connections = defaultdict(int)
 
     def forward_request(self, request):
-        return self.master.handle_request(request)
+        worker = self.get_worker()
+        response = worker.process(request)
+        self.release_worker(worker)
+        return response
 
     def get_worker(self, request=None):
         with self.lock:
