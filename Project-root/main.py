@@ -4,9 +4,7 @@ from master.scheduler import Scheduler
 from client.load_generator import run_load_test_sync
 import logging
 
-# Mute the detailed logs during tests
 logging.getLogger("Master").setLevel(logging.WARNING)
-
 
 def main():
     workers = [GPUWorker(i) for i in range(4)]
@@ -24,6 +22,7 @@ def main():
     print("\nSummary:")
     print(f"{'Users':<8} {'Throughput':<12} {'Avg Latency':<12} {'P95 Latency':<12}")
     print("-" * 44)
+
     for r in [results_100, results_500, results_1000]:
         print(f"{r.total_requests:<8} {r.throughput:<12.2f} {r.avg_latency*1000:<12.2f} {r.p95_latency*1000:<12.2f}")
 
