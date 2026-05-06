@@ -1,14 +1,19 @@
+# master/scheduler.py
+
 import time
 import threading
 import logging
 from enum import Enum
 
-logging.basicConfig(
+''' logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [Master] %(message)s",
     datefmt="%H:%M:%S"
-)
+)'''
+
+# In master/scheduler.py
 log = logging.getLogger("Master")
+
 
 
 class Strategy(Enum):
@@ -103,6 +108,11 @@ class Scheduler:
         return min(alive, key=lambda ws: ws.load_percent)
 
     def assign_task(self, request):
+        """
+        Assigns the incoming task to an available worker.
+        Intercepts mid-execution exceptions on worker nodes and triggers
+        graceful task reassignment as part of the Fault Tolerance strategy.
+        """
         MAX_RETRIES = 3
         start_time  = time.time()
 
@@ -143,13 +153,35 @@ class Scheduler:
 
             except Exception as e:
                 log.error(f"Worker {ws.worker_id} FAILED on request {request.id}: {e}")
+                
+                # Update metrics & mark crashed worker as FAILED
                 with ws.lock:
                     ws.is_alive     = False
                     ws.active_tasks = max(0, ws.active_tasks - 1)
+                
                 with self._metrics_lock:
                     self.failed_assigns += 1
+                
                 log.warning(f"Reassigning request {request.id} "
                             f"(attempt {attempt}/{MAX_RETRIES})")
+
+                # ========================================================
+                # 🛠️ FAULT TOLERANCE: DYNAMIC WORKER REASSIGNMENT
+                # ========================================================
+                try:
+                    # Dynamically imported to prevent cyclic importing with fault.py
+                    from fault import reassign_task
+                    
+                    # Intercept failover and execute on a healthy backup node
+                    response = reassign_task(self, request, ws.worker_id)
+                    
+                    # If recovery completes successfully, return immediately
+                    if response.get("status") != "error":
+                        return response
+                        
+                except Exception as reassignment_error:
+                    log.error(f"Failover recovery attempt failed: {reassignment_error}")
+                # ========================================================
 
         log.error(f"Request {request.id} DROPPED after {MAX_RETRIES} failed attempts.")
         return {"id": request.id, "result": "ERROR: all workers failed", "latency": -1}

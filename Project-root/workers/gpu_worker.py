@@ -73,17 +73,12 @@ class GPUWorker:
     # MAIN EXECUTION PIPELINE
     # =====================================================
 
+    # In workers/gpu_worker.py
+
     def process(self, request):
         """
         Executes full inference pipeline for a request.
-
-        Args:
-            request: Dictionary with 'id' and 'query' keys
-
-        Returns:
-            Result dictionary with response and metadata
         """
-
         start_time = time.time()
 
         with self.lock:
@@ -93,29 +88,34 @@ class GPUWorker:
                 raise Exception(f"Worker {self.id} at capacity")
             self.active_tasks += 1
 
-        request_id = request.get("id", -1)
-        query = request.get("query", "")
+        # ========================================================
+        # 🛠️ FIXED: Handle both Request dataclass objects and raw dicts
+        # ========================================================
+        if hasattr(request, "id"):
+            request_id = request.id
+            query = request.query
+        elif isinstance(request, dict):
+            request_id = request.get("id", -1)
+            query = request.get("query", "")
+        else:
+            request_id = -1
+            query = str(request)
+        # ========================================================
 
         log.info(f"Worker {self.id} started request {request_id}")
 
         try:
-            # -------------------------
             # 1. RAG RETRIEVAL
-            # -------------------------
             try:
                 context = retrieve_context(query)
             except Exception as e:
                 log.warning(f"RAG retrieval failed: {e}, continuing without context")
                 context = ""
 
-            # -------------------------
             # 2. GPU INFERENCE
-            # -------------------------
             result = infer(query, context=context, max_tokens=256)
 
-            # -------------------------
             # 3. POST-PROCESSING
-            # -------------------------
             self._post_process()
 
             latency = time.time() - start_time
