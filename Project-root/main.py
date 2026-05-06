@@ -7,6 +7,8 @@ import logging
 
 logging.getLogger("Master").setLevel(logging.WARNING)
 
+from llm.inference_engine import set_backend
+set_backend("simulated")  # or "claude" or "ollama"
 
 def main():
     workers = [GPUWorker(i, capacity=70) for i in range(4)]
