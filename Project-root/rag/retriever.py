@@ -1,41 +1,32 @@
-# rag/retriever.py
-import random
 import logging
 
-##logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [RAG] %(message)s")
 log = logging.getLogger("RAG")
 
-# Mock database mapping keywords to contextual knowledge base blocks
 MOCK_KNOWLEDGE_BASE = {
     "distributed": "In distributed systems, components located on networked computers communicate and coordinate actions via messages.",
     "load": "Load balancing routes incoming requests across a cluster of nodes to optimize utilization and minimize latency.",
-    "fault": "Fault tolerance is the system properties enabling continuity of operations in the event of partial node failures.",
-    "gpu": "GPUs are specialized hardware processors designed for heavy parallel computation pathways required by LLMs.",
-    "llm": "Large Language Models use highly parameterized neural network architectures to generate human-like text sequence predictions.",
+    "fault": "Fault tolerance enables continuity of operations despite partial node failures.",
+    "gpu": "GPUs are specialized processors optimized for parallel computation used in LLM inference.",
+    "llm": "Large Language Models use deep neural networks to generate human-like text.",
+    "model": "LLM models such as GPT and LLaMA process text using transformer-based architectures.",
+    "inference": "Inference is the process of running a trained LLM model to generate responses from input prompts.",
+    "cluster": "A GPU cluster consists of multiple GPU nodes working together to handle distributed inference workloads.",
+    "request": "Requests are incoming user queries routed through the load balancer to available GPU worker nodes.",
 }
 
 def retrieve_context(query: str) -> str:
-    """
-    Simulates semantic context retrieval from a vector database.
-    Scans the client query for keywords and returns corresponding contextual facts.
-    """
-    log.info(f"Retrieving vector DB context for query: '{query}'")
-    
+    log.info(f"Retrieving context for query: '{query}'")
+
     query_lower = query.lower()
-    matched_contexts = []
-    
+    scored_contexts = []
+
     for keyword, context in MOCK_KNOWLEDGE_BASE.items():
         if keyword in query_lower:
-            matched_contexts.append(context)
-            
-    if matched_contexts:
-        # Join matching contexts if multiple keywords are identified
-        return " ".join(matched_contexts)
-    
-    # Fallback contexts if no keywords hit
-    fallback_contexts = [
-        "Standard high-concurrency computing environment context.",
-        "General-purpose inference pipeline parameters applied.",
-        "Default contextual system knowledge telemetry."
-    ]
-    return random.choice(fallback_contexts)
+            score = query_lower.count(keyword)
+            scored_contexts.append((score, context))
+
+    if scored_contexts:
+        scored_contexts.sort(reverse=True)
+        return " ".join([ctx for _, ctx in scored_contexts])
+
+    return "General distributed system context with standard inference pipeline behavior."

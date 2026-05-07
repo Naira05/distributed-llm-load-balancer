@@ -1,16 +1,20 @@
-
 from workers.gpu_worker import GPUWorker
 from lb.load_balancer import LoadBalancer
 from master.scheduler import Scheduler
 from client.load_generator import run_load_test_sync
-import logging
+from llm.inference_engine import set_backend, infer
 
+import logging
 logging.getLogger("Master").setLevel(logging.WARNING)
 
-from llm.inference_engine import set_backend
-set_backend("simulated")  # or "claude" or "ollama"
+# choose backend
+set_backend("ollama")   # or "simulated" if Ollama is slow
 
-def main():
+def main(): 
+    print("Test LLM response:")
+    print(infer("What is load balancing?")["response"])
+    print("-" * 50)
+
     workers = [GPUWorker(i, capacity=70) for i in range(4)]
     
     lb = LoadBalancer(workers, master=None)
@@ -18,18 +22,23 @@ def main():
     lb.master = scheduler
     lb.dispatch_to_worker = lambda worker_id, request: workers[worker_id].process(request)
 
-    print("Running custom heavy load tests...\n")
+    print("Running small test (10 users)...\n")
 
-    results_25 = run_load_test_sync(scheduler, num_users=100, concurrency_limit=50)
-    results_100 = run_load_test_sync(scheduler, num_users=300, concurrency_limit=100)
-    results_200 = run_load_test_sync(scheduler, num_users=1000, concurrency_limit=200) 
+    # SMALL TEST FIRST
+    results_10 = run_load_test_sync(
+        scheduler,
+        num_users=1000,
+        concurrency_limit=50
+    )
 
     print("\nSummary:")
     print(f"{'Users':<8} {'Throughput':<12} {'Avg Latency':<12} {'P95 Latency':<12}")
     print("-" * 44)
 
-    for r in [results_25, results_100, results_200]:
-        print(f"{r.total_requests:<8} {r.throughput:<12.2f} {r.avg_latency*1000:<12.2f} {r.p95_latency*1000:<12.2f}")
-        
+    print(f"{results_10.total_requests:<8} "
+          f"{results_10.throughput:<12.2f} "
+          f"{results_10.avg_latency*1000:<12.2f} "
+          f"{results_10.p95_latency*1000:<12.2f}")
+
 if __name__ == "__main__":
     main()
