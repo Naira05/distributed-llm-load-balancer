@@ -1,26 +1,35 @@
-from workers.gpu_worker import GPUWorker
 from lb.load_balancer import LoadBalancer
 from master.scheduler import Scheduler
+from workers.gpu_worker import GPUWorker
 from client.load_generator import run_load_test_sync
-from llm.inference_engine import set_backend, infer
+import logging
+import requests
+
 
 import logging
 logging.getLogger("Master").setLevel(logging.WARNING)
 
-# choose backend
-set_backend("ollama")   # or "simulated" if Ollama is slow
 
-def main(): 
-    print("Test LLM response:")
-    print(infer("What is load balancing?")["response"])
-    print("-" * 50)
+def main():
+    workers = [GPUWorker(i) for i in range(4)]
 
-    workers = [GPUWorker(i, capacity=70) for i in range(4)]
-    
-    lb = LoadBalancer(workers, master=None)
-    scheduler = Scheduler(lb)
-    lb.master = scheduler
-    lb.dispatch_to_worker = lambda worker_id, request: workers[worker_id].process(request)
+    worker_urls = [
+        "http://localhost:8001",
+        "http://localhost:8002",
+        "http://localhost:8003",
+        "http://localhost:8004",
+    ]
+
+    scheduler = Scheduler(None)
+
+    lb = LoadBalancer(worker_urls=worker_urls, master=scheduler)
+
+    scheduler.lb = lb
+
+    lb.dispatch_to_worker = lambda worker_id, request: requests.post(
+        worker_urls[worker_id],
+        json=request
+    ).json()
 
     print("Running small test (10 users)...\n")
 

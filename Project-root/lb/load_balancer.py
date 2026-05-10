@@ -1,52 +1,76 @@
-import threading
-from collections import defaultdict
+import requests
+
 
 class LoadBalancer:
-    def __init__(self, workers, master, strategy="round_robin"):
-        self.workers = workers
+
+    def __init__(self, worker_urls, master=None):
+
+        self.worker_urls = worker_urls  # ["http://localhost:8000", ...]
         self.master = master
-        self.strategy = strategy
-        self.lock = threading.Lock()
-        self.index = 0
-        self.connections = defaultdict(int)
+        self.current = 0
 
-    def forward_request(self, request):
-            print(f"[LB] Received request: {request}")
+    # ROUND ROBIN
 
-            response = self.master.handle_request(request)
+    def round_robin(self):
 
-            print(f"[LB] Response returned to client: {response}")
+        url = self.worker_urls[
+            self.current % len(self.worker_urls)
+        ]
 
-            return response
+        self.current += 1
+        return url
 
-    def get_worker(self, request=None):
-        with self.lock:
-            if self.strategy == "round_robin":
-                return self._round_robin()
-            elif self.strategy == "least_connections":
-                return self._least_connections()
-            elif self.strategy == "load_aware":
-                return self._load_aware()
-            else:
-                raise ValueError("Unknown strategy")
+    # LEAST CONNECTIONS (REMOTE VERSION)
 
-    def _round_robin(self):
-        worker = self.workers[self.index]
-        self.index = (self.index + 1) % len(self.workers)
-        self.connections[worker] += 1
-        return worker
+    def least_connections(self):
 
-    def _least_connections(self):
-        worker = min(self.workers, key=lambda w: self.connections[w])
-        self.connections[worker] += 1
-        return worker
+        # would require health API from workers
+        best = None
+        best_load = float("inf")
 
-    def _load_aware(self):
-        worker = min(self.workers, key=lambda w: w.load)
-        self.connections[worker] += 1
-        return worker
+        for url in self.worker_urls:
 
-    def release_worker(self, worker):
-        with self.lock:
-            if self.connections[worker] > 0:
-                self.connections[worker] -= 1
+            res = requests.get(f"{url}/load").json()
+
+            load = res["active_tasks"]
+
+            if load < best_load:
+                best_load = load
+                best = url
+
+        return best
+
+    # LOAD AWARE ROUTING
+
+    def load_aware(self):
+
+        best = None
+        best_score = float("inf")
+
+        for url in self.worker_urls:
+
+            res = requests.get(f"{url}/load").json()
+
+            score = (
+                res["active_tasks"] +
+                res["gpu_utilization"] / 100
+            )
+
+            if score < best_score:
+                best_score = score
+                best = url
+
+        return best
+
+    # DISPATCH REQUEST
+
+    def dispatch(self, request):
+
+        url = self.load_aware()
+
+        response = requests.post(
+            f"{url}/process",
+            json=request
+        )
+
+        return response.json()
