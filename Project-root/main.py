@@ -1,53 +1,50 @@
 from lb.load_balancer import LoadBalancer
 from master.scheduler import Scheduler
-from workers.gpu_worker import GPUWorker
 from client.load_generator import run_load_test_sync
 import logging
-import requests
 
-
-import logging
 logging.getLogger("Master").setLevel(logging.WARNING)
 
 
 def main():
-    workers = [GPUWorker(i) for i in range(4)]
-
+    # ── point at whichever worker servers are actually running ────────────────
+    # Add or remove URLs to match how many terminals/machines you started
     worker_urls = [
         "http://localhost:8001",
         "http://localhost:8002",
-        "http://localhost:8003",
-        "http://localhost:8004",
+        # "http://localhost:8003",   # uncomment when you start a 3rd worker
+        # "http://localhost:8004",   # uncomment when you start a 4th worker
     ]
 
-    scheduler = Scheduler(None)
+    # ── build LB (starts background health-checker automatically) ─────────────
+    lb = LoadBalancer(worker_urls=worker_urls)
 
-    lb = LoadBalancer(worker_urls=worker_urls, master=scheduler)
+    # ── scheduler dispatches through the LB, not directly to worker objects ───
+    scheduler = Scheduler(lb)
 
-    scheduler.lb = lb
+    # ── quick sanity check: ping all workers before starting load test ─────────
+    print("\n[Main] Worker status before test:")
+    for url, info in lb.status().items():
+        print(f"  {url}  →  {'✔ alive' if info['alive'] else '✖ DOWN'}")
 
-    lb.dispatch_to_worker = lambda worker_id, request: requests.post(
-        worker_urls[worker_id],
-        json=request
-    ).json()
+    print(f"\n[Main] Running load test (1000 users, concurrency=50)...\n")
 
-    print("Running small test (10 users)...\n")
-
-    # SMALL TEST FIRST
-    results_10 = run_load_test_sync(
+    results = run_load_test_sync(
         scheduler,
         num_users=1000,
-        concurrency_limit=50
+        concurrency_limit=50,
     )
 
-    print("\nSummary:")
-    print(f"{'Users':<8} {'Throughput':<12} {'Avg Latency':<12} {'P95 Latency':<12}")
-    print("-" * 44)
+    # ── print summary ─────────────────────────────────────────────────────────
+    print("\n" + "=" * 50)
+    print("RESULTS SUMMARY")
+    print("=" * 50)
+    print(f"{'Total Requests':<20} {results.total_requests}")
+    print(f"{'Throughput':<20} {results.throughput:.2f} req/s")
+    print(f"{'Avg Latency':<20} {results.avg_latency * 1000:.2f} ms")
+    print(f"{'P95 Latency':<20} {results.p95_latency * 1000:.2f} ms")
+    print("=" * 50)
 
-    print(f"{results_10.total_requests:<8} "
-          f"{results_10.throughput:<12.2f} "
-          f"{results_10.avg_latency*1000:<12.2f} "
-          f"{results_10.p95_latency*1000:<12.2f}")
 
 if __name__ == "__main__":
     main()
