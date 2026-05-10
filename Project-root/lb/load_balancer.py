@@ -6,39 +6,34 @@ from typing import List, Optional, Dict, Any
 
 class LoadBalancer:
 
-    # ── construction ──────────────────────────────────────────────────────────
-
     def __init__(
         self,
         worker_urls: List[str],
-        health_check_interval: float = 5.0,   # seconds between health checks
-        request_timeout:       float = 120.0,  # seconds before a /process call times out
+        health_check_interval: float = 5.0,
+        request_timeout: float = 120.0,
     ):
-        self.worker_urls           = list(worker_urls)
-        self.request_timeout       = request_timeout
-        self._current_rr           = 0
-        self._lock                 = threading.Lock()
+        self.worker_urls = list(worker_urls)
+        self.request_timeout = request_timeout
+        self._current_rr = 0
+        self._lock = threading.Lock()
 
-        # track which workers are currently alive
         self._alive: Dict[str, bool] = {url: True for url in worker_urls}
 
-        # start background health-checker
         self._health_thread = threading.Thread(
             target=self._health_loop,
             args=(health_check_interval,),
             daemon=True,
         )
         self._health_thread.start()
+
         print(f"[LB] Started with {len(worker_urls)} workers: {worker_urls}")
 
-    # ── alive workers ─────────────────────────────────────────────────────────
-
+    # ── alive workers ────────────────────────────────────────────────
     def _live_workers(self) -> List[str]:
         with self._lock:
             return [u for u, alive in self._alive.items() if alive]
 
-    # ── background health checks ──────────────────────────────────────────────
-
+    # ── health check ────────────────────────────────────────────────
     def _health_loop(self, interval: float):
         while True:
             time.sleep(interval)
@@ -53,135 +48,87 @@ class LoadBalancer:
             alive = False
 
         with self._lock:
-            was_alive = self._alive.get(url, True)
             self._alive[url] = alive
 
-        if was_alive and not alive:
-            print(f"[LB] ⚠  Worker {url} is DOWN")
-        elif not was_alive and alive:
-            print(f"[LB] ✔  Worker {url} is back UP")
-
-    # ── strategy: Round Robin ─────────────────────────────────────────────────
-
+    # ── Round Robin ────────────────────────────────────────────────
     def round_robin(self) -> Optional[str]:
         workers = self._live_workers()
         if not workers:
             return None
+
         with self._lock:
             url = workers[self._current_rr % len(workers)]
             self._current_rr += 1
         return url
 
-    # ── strategy: Least Connections ───────────────────────────────────────────
-
+    # ── Least Connections ───────────────────────────────────────────
     def least_connections(self) -> Optional[str]:
         workers = self._live_workers()
         if not workers:
             return None
 
         best, best_load = None, float("inf")
+
         for url in workers:
             try:
                 data = requests.get(f"{url}/load", timeout=2).json()
                 load = data.get("active_tasks", 0)
+
                 if load < best_load:
                     best_load = load
-                    best      = url
+                    best = url
+
             except Exception:
-                # worker unreachable → skip it
                 with self._lock:
                     self._alive[url] = False
-                print(f"[LB] ⚠  {url} unreachable during least-connections probe")
 
         return best
 
-    # ── strategy: Load-Aware Routing ─────────────────────────────────────────
-
+    # ── Load Aware ────────────────────────────────────────────────
     def load_aware(self) -> Optional[str]:
-        """
-        Score = active_tasks + gpu_utilization / 100
-        Lower score → preferred worker.
-        """
         workers = self._live_workers()
         if not workers:
             return None
 
         best, best_score = None, float("inf")
+
         for url in workers:
             try:
-                data  = requests.get(f"{url}/load", timeout=2).json()
+                data = requests.get(f"{url}/load", timeout=2).json()
                 score = data.get("active_tasks", 0) + data.get("gpu_utilization", 0) / 100
+
                 if score < best_score:
                     best_score = score
-                    best       = url
+                    best = url
+
             except Exception:
                 with self._lock:
                     self._alive[url] = False
-                print(f"[LB] ⚠  {url} unreachable during load-aware probe")
 
         return best
 
-    # ── dispatch ──────────────────────────────────────────────────────────────
-
-    def dispatch(
-        self,
-        request_payload: Dict[str, Any],
-        strategy: str = "load_aware",
-    ) -> Dict[str, Any]:
-        """
-        Send *request_payload* to the best available worker using *strategy*.
-
-        strategy options: "round_robin" | "least_connections" | "load_aware"
-
-        Returns the worker's response dict, or an error dict if all workers
-        are unavailable or the request fails.
-        """
+    # ── Dispatch ────────────────────────────────────────────────
+    def dispatch(self, request_payload: Dict[str, Any], strategy: str = "load_aware"):
         strategy_fn = {
-            "round_robin":       self.round_robin,
+            "round_robin": self.round_robin,
             "least_connections": self.least_connections,
-            "load_aware":        self.load_aware,
+            "load_aware": self.load_aware,
         }.get(strategy, self.load_aware)
 
         url = strategy_fn()
 
         if url is None:
-            return {
-                "request_id": request_payload.get("id"),
-                "status":     "error",
-                "error":      "No workers available",
-            }
+            return {"status": "error", "error": "No workers available"}
 
         try:
-            print(f"[LB] → dispatch request={request_payload.get('id')} to {url}")
-            resp = requests.post(
-                f"{url}/process",
-                json=request_payload,
-                timeout=self.request_timeout,
-            )
+            resp = requests.post(f"{url}/process", json=request_payload, timeout=self.request_timeout)
             return resp.json()
 
-        except requests.exceptions.Timeout:
-            # mark worker suspect; caller can retry
+        except Exception as e:
             with self._lock:
                 self._alive[url] = False
-            return {
-                "request_id": request_payload.get("id"),
-                "status":     "error",
-                "error":      f"Worker {url} timed out",
-            }
+            return {"status": "error", "error": str(e)}
 
-        except Exception as exc:
-            with self._lock:
-                self._alive[url] = False
-            return {
-                "request_id": request_payload.get("id"),
-                "status":     "error",
-                "error":      str(exc),
-            }
-
-    # ── status snapshot ───────────────────────────────────────────────────────
-
-    def status(self) -> Dict[str, Any]:
-        """Return a summary of all workers and their alive/dead state."""
+    def status(self):
         with self._lock:
-            return {url: {"alive": alive} for url, alive in self._alive.items()}
+            return {u: {"alive": a} for u, a in self._alive.items()}

@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "tinyllama"   # must match: ollama pull tinyllama
+DEFAULT_MODEL = "tiny"   # must match: ollama pull tinyllama
 
 @dataclass
 class ModelSpec:
@@ -19,10 +19,10 @@ class ModelSpec:
 
 
 MODELS = {
-    "tiny":   ModelSpec("tinyllama", 100, 0.65, 4096,  80),
-    "small":  ModelSpec("small",      50, 0.75, 4096, 120),
-    "medium": ModelSpec("medium",     25, 0.85, 4096, 200),
-    "large":  ModelSpec("large",      10, 0.92, 8192, 500),
+    "tiny":   ModelSpec("tinyllama:latest", 100, 0.65, 4096,  80),
+    "small":  ModelSpec("small:latest",      50, 0.75, 4096, 120),
+    "medium": ModelSpec("medium:latest",     25, 0.85, 4096, 200),
+    "large":  ModelSpec("large:latest",      10, 0.92, 8192, 500),
 }
 
 # ── ENGINE ────────────────────────────────────────────────────────────────────

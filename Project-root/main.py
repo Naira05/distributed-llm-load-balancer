@@ -7,27 +7,31 @@ logging.getLogger("Master").setLevel(logging.WARNING)
 
 
 def main():
-    # ── point at whichever worker servers are actually running ────────────────
-    # Add or remove URLs to match how many terminals/machines you started
-    worker_urls = [
-        "http://localhost:8001",
-        "http://localhost:8002",
-        # "http://localhost:8003",   # uncomment when you start a 3rd worker
-        # "http://localhost:8004",   # uncomment when you start a 4th worker
+
+    workers = [
+        {
+            "id": "Mai",
+            "url": "https://powwow-platypus-vice.ngrok-free.dev/",
+            "capacity": 4,
+        },
+        {
+            "id": "Naira",
+            "url": "https://decidable-chubby-muppet.ngrok-free.dev/",
+            "capacity": 4,
+        },
     ]
 
-    # ── build LB (starts background health-checker automatically) ─────────────
-    lb = LoadBalancer(worker_urls=worker_urls)
+    # ✅ extract URLs only
+    worker_urls = [w["url"] for w in workers]
 
-    # ── scheduler dispatches through the LB, not directly to worker objects ───
+    lb = LoadBalancer(worker_urls=worker_urls)
     scheduler = Scheduler(lb)
 
-    # ── quick sanity check: ping all workers before starting load test ─────────
     print("\n[Main] Worker status before test:")
     for url, info in lb.status().items():
-        print(f"  {url}  →  {'✔ alive' if info['alive'] else '✖ DOWN'}")
+        print(f"  {url} → {'✔ alive' if info['alive'] else '✖ DOWN'}")
 
-    print(f"\n[Main] Running load test (1000 users, concurrency=50)...\n")
+    print("\n[Main] Running load test (1000 users, concurrency=50)...\n")
 
     results = run_load_test_sync(
         scheduler,
@@ -35,7 +39,6 @@ def main():
         concurrency_limit=50,
     )
 
-    # ── print summary ─────────────────────────────────────────────────────────
     print("\n" + "=" * 50)
     print("RESULTS SUMMARY")
     print("=" * 50)
