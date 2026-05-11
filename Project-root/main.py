@@ -1,9 +1,12 @@
+# main_master.py
+# Run this on the master machine to distribute requests across GPU workers
+
 from lb.load_balancer import LoadBalancer
 from master.scheduler import Scheduler
 from client.load_generator import run_load_test_sync
 import logging
 
-logging.getLogger("Master").setLevel(logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 
 
 def main():
@@ -20,41 +23,28 @@ def main():
             "capacity": 4,
         },
         {
-            "id" : "Maryam",
+            "id": "Maryam",
             "url": "https://affront-squint-embolism.ngrok-free.dev",
-            "Capacity": 2,
+            "capacity": 2,
         },
-        """
-         {
-            "id" : "Mariam",
-            "url": "",
-            "Capacity": 4,
-        },   
-        {
-            "id" : "Nourhan",
-            "url": "",
-            "Capacity": 3,
-        },
-        """
     ]
 
-    # ✅ extract URLs only
-    worker_urls = [w["url"] for w in workers]
+    workers_url = [w["url"] for w in workers]
 
-    lb = LoadBalancer(worker_urls=worker_urls)
+    lb = LoadBalancer(worker_urls=workers_url)
     scheduler = Scheduler(lb)
 
-    print("\n[Main] Worker status before test:")
-    for url, info in lb.status().items():
-        print(f"  {url} → {'✔ alive' if info['alive'] else '✖ DOWN'}")
+    # GPU snapshot BEFORE
+    scheduler.print_gpu_status("GPU Workers — Before Load Test")
 
-    print("\n[Main] Running load test (1000 users, concurrency=50)...\n")
+    print("\n[Master] Running load test ..\n")
+    results = run_load_test_sync(scheduler, num_users=10, concurrency_limit=5)
 
-    results = run_load_test_sync(
-        scheduler,
-        num_users=1000,
-        concurrency_limit=50,
-    )
+    # GPU snapshot AFTER
+    scheduler.print_gpu_status("GPU Workers — After Load Test")
+
+    # Per-worker breakdown
+    scheduler.print_worker_summary()
 
     print("\n" + "=" * 50)
     print("RESULTS SUMMARY")
