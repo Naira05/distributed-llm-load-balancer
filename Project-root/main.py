@@ -19,6 +19,23 @@ def main():
             "url": "https://decidable-chubby-muppet.ngrok-free.dev/",
             "capacity": 4,
         },
+        {
+            "id" : "Maryam",
+            "url": "https://affront-squint-embolism.ngrok-free.dev",
+            "Capacity": 2,
+        },
+        """
+         {
+            "id" : "Mariam",
+            "url": "",
+            "Capacity": 4,
+        },   
+        {
+            "id" : "Nourhan",
+            "url": "",
+            "Capacity": 3,
+        },
+        """
     ]
 
     # ✅ extract URLs only
