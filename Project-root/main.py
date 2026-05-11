@@ -24,9 +24,16 @@ def main():
         },
         {
             "id": "Maryam",
-            "url": "https://affront-squint-embolism.ngrok-free.dev",
+            "url": "https://affront-squint-embolism.ngrok-free.dev/",
             "capacity": 2,
         },
+         {
+            "id": "Nourhan",
+            "url": "https://gullible-anybody-gluten.ngrok-free.dev/",
+            "capacity": 2,
+        },
+  
+        
     ]
 
     workers_url = [w["url"] for w in workers]
