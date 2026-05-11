@@ -58,3 +58,12 @@ The system consists of the following components:
 
 ```bash
 python main.py
+
+```bash 
+## windows command to run the gpu worker: 
+curl.exe -H "ngrok-skip-browser-warning: true" https://authToken/health
+
+## Macbook
+curl -H "ngrok-skip-browser-warning: true" https://authToken/health
+
+

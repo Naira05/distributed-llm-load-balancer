@@ -1,44 +1,72 @@
-from workers.gpu_worker import GPUWorker
+# main_master.py
+# Run this on the master machine to distribute requests across GPU workers
+
 from lb.load_balancer import LoadBalancer
 from master.scheduler import Scheduler
 from client.load_generator import run_load_test_sync
-from llm.inference_engine import set_backend, infer
-
 import logging
-logging.getLogger("Master").setLevel(logging.WARNING)
 
-# choose backend
-set_backend("ollama")   # or "simulated" if Ollama is slow
+logging.basicConfig(level=logging.INFO)
 
-def main(): 
-    print("Test LLM response:")
-    print(infer("What is load balancing?")["response"])
-    print("-" * 50)
 
-    workers = [GPUWorker(i, capacity=70) for i in range(4)]
-    
-    lb = LoadBalancer(workers, master=None)
+def main():
+
+    workers = [
+        {
+            "id": "Mai",
+            "url": "https://powwow-platypus-vice.ngrok-free.dev/",
+            "capacity": 2,
+        },
+        {
+            "id": "Naira",
+            "url": "https://decidable-chubby-muppet.ngrok-free.dev/",
+            "capacity": 2,
+        },
+        {
+            "id": "Maryam",
+            "url": "https://affront-squint-embolism.ngrok-free.dev/",
+            "capacity": 2,
+        },
+         {
+            "id": "Nourhan",
+            "url": "https://gullible-anybody-gluten.ngrok-free.dev/",
+            "capacity": 2,
+        },
+
+     #{
+            #"id": "Mariam",
+          #  "url": "https://absolve-uncouth-anvil.ngrok-free.dev/",
+           # "capacity": 1,
+        #},
+        
+    ]
+
+    workers_url = [w["url"] for w in workers]
+
+    lb = LoadBalancer(worker_urls=workers_url)
     scheduler = Scheduler(lb)
-    lb.master = scheduler
-    lb.dispatch_to_worker = lambda worker_id, request: workers[worker_id].process(request)
 
-    print("Running small test (10 users)...\n")
+    # GPU snapshot BEFORE
+    scheduler.print_gpu_status("GPU Workers — Before Load Test")
 
-    # SMALL TEST FIRST
-    results_10 = run_load_test_sync(
-        scheduler,
-        num_users=1000,
-        concurrency_limit=50
-    )
+    print("\n[Master] Running load test ..\n")
+    results = run_load_test_sync(scheduler, num_users=100, concurrency_limit=5)
 
-    print("\nSummary:")
-    print(f"{'Users':<8} {'Throughput':<12} {'Avg Latency':<12} {'P95 Latency':<12}")
-    print("-" * 44)
+    # GPU snapshot AFTER
+    scheduler.print_gpu_status("GPU Workers — After Load Test")
 
-    print(f"{results_10.total_requests:<8} "
-          f"{results_10.throughput:<12.2f} "
-          f"{results_10.avg_latency*1000:<12.2f} "
-          f"{results_10.p95_latency*1000:<12.2f}")
+    # Per-worker breakdown
+    scheduler.print_worker_summary()
+
+    print("\n" + "=" * 50)
+    print("RESULTS SUMMARY")
+    print("=" * 50)
+    print(f"{'Total Requests':<20} {results.total_requests}")
+    print(f"{'Throughput':<20} {results.throughput:.2f} req/s")
+    print(f"{'Avg Latency':<20} {results.avg_latency * 1000:.2f} ms")
+    print(f"{'P95 Latency':<20} {results.p95_latency * 1000:.2f} ms")
+    print("=" * 50)
+
 
 if __name__ == "__main__":
     main()
