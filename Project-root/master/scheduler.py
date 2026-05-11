@@ -107,13 +107,19 @@ class Scheduler:
         else:
             payload = {"id": None, "query": str(request), "context": ""}
 
-        # Ask LB which worker it will use BEFORE dispatching (for logging)
-        chosen_url = self.lb.load_aware() if self.strategy == "load_aware" else \
-                     self.lb.round_robin() if self.strategy == "round_robin" else \
-                     self.lb.least_connections()
+        # FIX: removed the speculative pre-dispatch chosen_url call.
+        # Previously, assign_task called e.g. load_aware() here to get chosen_url,
+        # then dispatch() called it AGAIN internally — two /load polls per request,
+        # and the stats were recorded against the pre-pick URL, not the real one.
+        # Now we rely entirely on dispatch() and read routed_to from its response.
 
-        response = self.lb.dispatch(payload, strategy=self.strategy)
-        latency  = time.time() - start
+        response   = self.lb.dispatch(payload, strategy=self.strategy)
+        latency    = time.time() - start
+
+        # FIX: use the URL that dispatch() actually used, not a speculative pre-pick.
+        # This is what caused Worker 4's ID to show as None — stats were being
+        # attributed to the wrong worker URL.
+        chosen_url = response.get("routed_to")
 
         # ── update global stats ───────────────────────────────────────────────
         with self._lock:
@@ -143,8 +149,8 @@ class Scheduler:
                 f"mem={gpu['gpu_memory_used'] if gpu else '?'}MB"
             )
 
-        response["latency"]     = latency
-        response["routed_to"]   = chosen_url
+        response["latency"]   = latency
+        response["routed_to"] = chosen_url
         return response
 
     # ── metrics ───────────────────────────────────────────────────────────────

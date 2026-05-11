@@ -2,20 +2,53 @@
 
 import logging
 import time
-from typing import Optional
 
 log = logging.getLogger("Fault")
 
 
 def handle_failure(lb, failed_url: str):
     """
-    Mark a worker URL as dead in the load balancer.
-    Called when a worker returns an error or times out.
+    Explicitly mark a worker URL as dead in the load balancer.
+    Only call this for hard failures (connection refused, timeout, etc).
+    Do NOT call this for soft HTTP failures (500, error status in JSON) —
+    the health-check thread will handle recovery automatically.
     """
     log.warning(f"[Fault] Marking worker as failed: {failed_url}")
     with lb._lock:
         lb._alive[failed_url] = False
     print(f"\n[CRASH DETECTED] Worker at {failed_url} marked as DOWN.")
+
+
+def with_fault_tolerance(
+    lb,
+    payload: dict,
+    strategy: str = "load_aware",
+    max_retries: int = 3,
+) -> dict:
+    """
+    Drop-in fault-tolerant dispatcher.
+
+    Delegates entirely to lb.dispatch() which already handles:
+      - worker selection via the chosen strategy
+      - per-attempt failover with exclude logic
+      - marking workers dead only on hard (connection) failures
+      - returning routed_to so the scheduler can attribute stats correctly
+
+    Previously this function duplicated dispatch() logic and called
+    handle_failure() on soft errors (non-success JSON responses), which
+    permanently blacklisted workers 3 & 4 after their first 500 — causing
+    all subsequent requests to pile onto workers 1 & 2 only.
+    """
+    result = lb.dispatch(payload, strategy=strategy)
+
+    if result.get("status") != "success":
+        log.warning(
+            f"[Fault] Request {payload.get('id')} failed after {max_retries} attempts "
+            f"| last worker: {result.get('routed_to')} "
+            f"| error: {result.get('error')}"
+        )
+
+    return result
 
 
 def reassign_task(
@@ -27,89 +60,54 @@ def reassign_task(
     retry_delay: float = 1.0,
 ) -> dict:
     """
-    Retry a failed request on a different healthy worker.
-    Excludes the failed worker from selection for this request.
+    Retry a request while explicitly excluding a known-bad worker.
+    Use this when you already know a specific worker failed and want
+    to route away from it — e.g. after a timeout on a specific URL.
+
+    For general fault-tolerant dispatch, prefer with_fault_tolerance().
     """
     log.info(f"[Fault] Reassigning request {payload.get('id')} away from {failed_url}")
 
-    for attempt in range(1, max_retries + 1):
-        # temporarily hide the failed worker
-        with lb._lock:
-            original_state = lb._alive.get(failed_url, False)
-            lb._alive[failed_url] = False
-
-        try:
-            # pick a different worker
-            strategy_fn = {
-                "round_robin":       lb.round_robin,
-                "least_connections": lb.least_connections,
-                "load_aware":        lb.load_aware,
-            }.get(strategy, lb.load_aware)
-
-            new_url = strategy_fn()
-
-            if new_url is None or new_url == failed_url:
-                print(f"[Fault] Attempt {attempt}: No other workers available.")
-                time.sleep(retry_delay)
-                continue
-
-            print(f"[Fault] Attempt {attempt}: Reassigning → {new_url}")
-
-            import requests as req
-            resp = req.post(f"{new_url}/process", json=payload, timeout=lb.request_timeout)
-            result = resp.json()
-
-            print(f"[Fault] Reassignment succeeded on attempt {attempt} → {new_url}")
-            log.info(f"[Fault] Success on attempt {attempt} via {new_url}")
-            return result
-
-        except Exception as e:
-            log.warning(f"[Fault] Attempt {attempt} failed: {e}")
-            time.sleep(retry_delay)
-
-        finally:
-            # restore the failed worker's original state
-            with lb._lock:
-                lb._alive[failed_url] = original_state
-
-    log.error(f"[Fault] All {max_retries} retry attempts exhausted for request {payload.get('id')}")
-    return {"id": payload.get("id"), "status": "error", "error": "All retry attempts failed"}
-
-
-def with_fault_tolerance(
-    lb,
-    payload: dict,
-    strategy: str = "load_aware",
-    max_retries: int = 3,
-) -> dict:
-    """
-    Drop-in wrapper: dispatch a request with automatic failover.
-    Use this instead of lb.dispatch() for fault-tolerant sending.
-    """
     strategy_fn = {
         "round_robin":       lb.round_robin,
         "least_connections": lb.least_connections,
         "load_aware":        lb.load_aware,
     }.get(strategy, lb.load_aware)
 
-    url = strategy_fn()
+    last_failed = failed_url
 
-    if url is None:
-        return {"status": "error", "error": "No workers available"}
+    for attempt in range(1, max_retries + 1):
+        new_url = strategy_fn(exclude=last_failed)
 
-    try:
-        import requests as req
-        resp = req.post(f"{url}/process", json=payload, timeout=lb.request_timeout)
-        result = resp.json()
+        if new_url is None:
+            print(f"[Fault] Attempt {attempt}: No other workers available.")
+            time.sleep(retry_delay)
+            continue
 
-        if result.get("status") != "success":
-            log.warning(f"[Fault] Worker {url} returned non-success, triggering failover.")
-            handle_failure(lb, url)
-            return reassign_task(lb, payload, url, strategy, max_retries)
+        print(f"[Fault] Attempt {attempt}: Reassigning → {new_url}")
 
-        return result
+        try:
+            import requests as req
+            resp   = req.post(f"{new_url}/process", json=payload, timeout=lb.request_timeout)
+            result = resp.json()
+            result["routed_to"] = new_url
 
-    except Exception as e:
-        log.warning(f"[Fault] Worker {url} threw exception: {e}, triggering failover.")
-        handle_failure(lb, url)
-        return reassign_task(lb, payload, url, strategy, max_retries)
+            if result.get("status") == "success":
+                print(f"[Fault] Reassignment succeeded on attempt {attempt} → {new_url}")
+                log.info(f"[Fault] Success on attempt {attempt} via {new_url}")
+                return result
+
+            # Soft failure — skip this worker next attempt, do NOT mark it dead
+            log.warning(f"[Fault] Attempt {attempt}: {new_url} returned non-success, skipping.")
+            last_failed = new_url
+            time.sleep(retry_delay)
+
+        except Exception as e:
+            # Hard failure — safe to mark dead; health check will revive it
+            log.warning(f"[Fault] Attempt {attempt}: {new_url} threw exception ({e}), marking dead.")
+            handle_failure(lb, new_url)
+            last_failed = new_url
+            time.sleep(retry_delay)
+
+    log.error(f"[Fault] All {max_retries} retry attempts exhausted for request {payload.get('id')}")
+    return {"id": payload.get("id"), "status": "error", "error": "All retry attempts failed", "routed_to": last_failed}

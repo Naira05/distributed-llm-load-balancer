@@ -3,6 +3,7 @@ import time
 import requests
 from typing import List, Optional, Dict, Any
 
+
 class LoadBalancer:
 
     def __init__(
@@ -12,13 +13,13 @@ class LoadBalancer:
         request_timeout: float = 120.0,
         max_retries: int = 3,
     ):
-        self.worker_urls    = list(worker_urls)
+        self.worker_urls     = list(worker_urls)
         self.request_timeout = request_timeout
-        self.max_retries    = max_retries
-        self._current_rr    = 0
-        self._lock          = threading.Lock()
+        self.max_retries     = max_retries
+        self._current_rr     = 0
+        self._lock           = threading.Lock()
 
-        self._alive: Dict[str, bool]  = {url: True for url in worker_urls}
+        self._alive: Dict[str, bool] = {url: True for url in worker_urls}
         # track total processed per worker for better scoring
         self._processed: Dict[str, int] = {url: 0 for url in worker_urls}
 
@@ -76,11 +77,12 @@ class LoadBalancer:
                     best_load = load
                     best = url
             except Exception:
+                # FIX: only mark dead on connection-level exceptions, not soft failures
                 with self._lock:
                     self._alive[url] = False
         return best
 
-    # ── Load Aware (improved) ─────────────────────────────────────────────────
+    # ── Load Aware ────────────────────────────────────────────────────────────
     def load_aware(self, exclude: Optional[str] = None) -> Optional[str]:
         """
         Score = active_tasks * 3          (heaviest weight — real-time pressure)
@@ -107,6 +109,7 @@ class LoadBalancer:
                     best_score = score
                     best = url
             except Exception:
+                # FIX: only mark dead on connection-level exceptions, not soft failures
                 with self._lock:
                     self._alive[url] = False
         return best
@@ -147,14 +150,17 @@ class LoadBalancer:
                     result["routed_to"] = url
                     return result
 
-                # worker returned non-success — treat as soft failure
+                # FIX: soft failure (non-success response) — do NOT mark worker dead.
+                # Just skip it this attempt and let the health-check thread decide
+                # its fate. Permanently blacklisting on a 500 caused workers 3 & 4
+                # to be excluded for the entire load test.
                 print(f"[LB] Attempt {attempt}: {url} returned status={result.get('status')}, retrying...")
-                with self._lock:
-                    self._alive[url] = False
                 last_failed_url = url
                 time.sleep(0.5)
 
             except Exception as e:
+                # Hard failure (timeout, connection refused) — safe to mark dead;
+                # health check will revive it if it comes back up.
                 print(f"[LB] Attempt {attempt}: {url} threw exception ({e}), retrying...")
                 with self._lock:
                     self._alive[url] = False
@@ -162,8 +168,8 @@ class LoadBalancer:
                 time.sleep(0.5)
 
         return {
-            "status": "error",
-            "error":  f"All {self.max_retries} attempts failed",
+            "status":    "error",
+            "error":     f"All {self.max_retries} attempts failed",
             "routed_to": last_failed_url,
         }
 
