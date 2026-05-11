@@ -13,15 +13,20 @@ class LoadBalancer:
         request_timeout: float = 120.0,
         max_retries: int = 3,
     ):
-        self.worker_urls     = list(worker_urls)
+        self.worker_urls = list(worker_urls)
         self.request_timeout = request_timeout
-        self.max_retries     = max_retries
-        self._current_rr     = 0
-        self._lock           = threading.Lock()
+        self.max_retries = max_retries
+
+        self._current_rr = 0
+        self._lock = threading.Lock()
 
         self._alive: Dict[str, bool] = {url: True for url in worker_urls}
-        # track total processed per worker for better scoring
-        self._processed: Dict[str, int] = {url: 0 for url in worker_urls}
+
+        # session-based fairness
+        self._session_processed: Dict[str, int] = {url: 0 for url in worker_urls}
+
+        # NEW: latency tracking (EMA)
+        self._ema_latency: Dict[str, float] = {url: 0.0 for url in worker_urls}
 
         self._health_thread = threading.Thread(
             target=self._health_loop,
@@ -29,14 +34,21 @@ class LoadBalancer:
             daemon=True,
         )
         self._health_thread.start()
+
         print(f"[LB] Started with {len(worker_urls)} workers: {worker_urls}")
 
-    # ── alive workers ─────────────────────────────────────────────────────────
+    # ────────────────────────────────
+    # Helpers
+    # ────────────────────────────────
+
     def _live_workers(self) -> List[str]:
         with self._lock:
             return [u for u, alive in self._alive.items() if alive]
 
-    # ── health check ──────────────────────────────────────────────────────────
+    # ────────────────────────────────
+    # Health Check
+    # ────────────────────────────────
+
     def _health_loop(self, interval: float):
         while True:
             time.sleep(interval)
@@ -45,76 +57,98 @@ class LoadBalancer:
 
     def _check_health(self, url: str):
         try:
-            resp  = requests.get(f"{url}/health", timeout=2)
+            resp = requests.get(f"{url}/health", timeout=2)
             alive = resp.status_code == 200
         except Exception:
             alive = False
+
         with self._lock:
             self._alive[url] = alive
 
-    # ── Round Robin ───────────────────────────────────────────────────────────
+    # ────────────────────────────────
+    # Round Robin
+    # ────────────────────────────────
+
     def round_robin(self, exclude: Optional[str] = None) -> Optional[str]:
         workers = [w for w in self._live_workers() if w != exclude]
         if not workers:
             return None
+
         with self._lock:
             url = workers[self._current_rr % len(workers)]
             self._current_rr += 1
+
         return url
 
-    # ── Least Connections ─────────────────────────────────────────────────────
+    # ────────────────────────────────
+    # Least Connections
+    # ────────────────────────────────
+
     def least_connections(self, exclude: Optional[str] = None) -> Optional[str]:
         workers = [w for w in self._live_workers() if w != exclude]
         if not workers:
             return None
 
         best, best_load = None, float("inf")
+
         for url in workers:
             try:
                 data = requests.get(f"{url}/load", timeout=2).json()
                 load = data.get("active_tasks", 0)
+
                 if load < best_load:
                     best_load = load
                     best = url
+
             except Exception:
-                # FIX: only mark dead on connection-level exceptions, not soft failures
                 with self._lock:
                     self._alive[url] = False
+
         return best
 
-    # ── Load Aware ────────────────────────────────────────────────────────────
+    # ────────────────────────────────
+    # LOAD-AWARE (FIXED + IMPROVED)
+    # ────────────────────────────────
+
     def load_aware(self, exclude: Optional[str] = None) -> Optional[str]:
-        """
-        Score = active_tasks * 3          (heaviest weight — real-time pressure)
-              + gpu_utilization / 100      (GPU busy-ness)
-              + gpu_memory_used / 1000     (memory pressure)
-              + total_processed / 50       (historical load — prevents funneling)
-        Lower score = better worker.
-        """
+
         workers = [w for w in self._live_workers() if w != exclude]
         if not workers:
             return None
 
         best, best_score = None, float("inf")
+
         for url in workers:
             try:
-                data  = requests.get(f"{url}/load", timeout=2).json()
+                data = requests.get(f"{url}/load", timeout=2).json()
+
+                with self._lock:
+                    session_count = self._session_processed.get(url, 0)
+                    ema_latency = self._ema_latency.get(url, 0.0)
+
+                # 🔥 FINAL IMPROVED SCORING FUNCTION
                 score = (
-                    data.get("active_tasks",    0) * 3
+                    data.get("active_tasks", 0) * 2
                     + data.get("gpu_utilization", 0) / 100
                     + data.get("gpu_memory_used", 0) / 1000
-                    + data.get("total_processed", 0) / 50
+                    + session_count / 10
+                    + ema_latency / 1000   # ⭐ KEY FIX (latency-aware)
                 )
+
                 if score < best_score:
                     best_score = score
                     best = url
+
             except Exception:
-                # FIX: only mark dead on connection-level exceptions, not soft failures
                 with self._lock:
                     self._alive[url] = False
+
         return best
 
-    # ── Dispatch with built-in failover ───────────────────────────────────────
+    # ────────────────────────────────
+    # Dispatch
+    # ────────────────────────────────
+
     def dispatch(
         self,
         request_payload: Dict[str, Any],
@@ -122,56 +156,70 @@ class LoadBalancer:
     ) -> Dict[str, Any]:
 
         strategy_fn = {
-            "round_robin":       self.round_robin,
+            "round_robin": self.round_robin,
             "least_connections": self.least_connections,
-            "load_aware":        self.load_aware,
+            "load_aware": self.load_aware,
         }.get(strategy, self.load_aware)
 
         last_failed_url = None
 
         for attempt in range(1, self.max_retries + 1):
-            # exclude the last worker that failed so we pick a different one
+
             url = strategy_fn(exclude=last_failed_url)
 
             if url is None:
                 return {"status": "error", "error": "No healthy workers available"}
 
             try:
-                resp   = requests.post(
+                start = time.time()
+
+                resp = requests.post(
                     f"{url}/process",
                     json=request_payload,
                     timeout=self.request_timeout,
                 )
+
+                latency = time.time() - start
+
                 result = resp.json()
 
                 if result.get("status") == "success":
+
+                    # ── UPDATE STATS ──
                     with self._lock:
-                        self._processed[url] = self._processed.get(url, 0) + 1
+                        self._session_processed[url] += 1
+
+                        # 🔥 EMA update (smooth latency)
+                        old = self._ema_latency.get(url, 0.0)
+                        self._ema_latency[url] = 0.7 * old + 0.3 * latency
+
                     result["routed_to"] = url
+                    result["latency"] = latency
+
                     return result
 
-                # FIX: soft failure (non-success response) — do NOT mark worker dead.
-                # Just skip it this attempt and let the health-check thread decide
-                # its fate. Permanently blacklisting on a 500 caused workers 3 & 4
-                # to be excluded for the entire load test.
-                print(f"[LB] Attempt {attempt}: {url} returned status={result.get('status')}, retrying...")
+                print(f"[LB] Attempt {attempt}: soft failure from {url}")
                 last_failed_url = url
                 time.sleep(0.5)
 
             except Exception as e:
-                # Hard failure (timeout, connection refused) — safe to mark dead;
-                # health check will revive it if it comes back up.
-                print(f"[LB] Attempt {attempt}: {url} threw exception ({e}), retrying...")
+                print(f"[LB] Attempt {attempt}: error from {url}: {e}")
+
                 with self._lock:
                     self._alive[url] = False
+
                 last_failed_url = url
                 time.sleep(0.5)
 
         return {
-            "status":    "error",
-            "error":     f"All {self.max_retries} attempts failed",
+            "status": "error",
+            "error": f"All {self.max_retries} attempts failed",
             "routed_to": last_failed_url,
         }
+
+    # ────────────────────────────────
+    # Status
+    # ────────────────────────────────
 
     def status(self):
         with self._lock:

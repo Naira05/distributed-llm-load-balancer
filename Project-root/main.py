@@ -33,11 +33,11 @@ def main():
             "capacity": 2,
         },
 
-     {
-            "id": "Mariam",
-            "url": "https://absolve-uncouth-anvil.ngrok-free.dev/",
-            "capacity": 2,
-        },
+     #{
+            #"id": "Mariam",
+          #  "url": "https://absolve-uncouth-anvil.ngrok-free.dev/",
+           # "capacity": 1,
+        #},
         
     ]
 
@@ -50,7 +50,7 @@ def main():
     scheduler.print_gpu_status("GPU Workers — Before Load Test")
 
     print("\n[Master] Running load test ..\n")
-    results = run_load_test_sync(scheduler, num_users=10, concurrency_limit=5)
+    results = run_load_test_sync(scheduler, num_users=100, concurrency_limit=5)
 
     # GPU snapshot AFTER
     scheduler.print_gpu_status("GPU Workers — After Load Test")

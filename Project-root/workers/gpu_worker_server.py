@@ -1,4 +1,3 @@
-
 import argparse
 import threading
 import time
@@ -28,6 +27,31 @@ class GPUWorkerState:
         self.gpu_memory_used = 0.0
         self.lock            = threading.Lock()
 
+        # FIX: start a background thread that continuously decays GPU stats
+        # toward 0 when the worker is idle. Without this, the random walk in
+        # _enter_task/_leave_task drifts permanently high across runs, causing
+        # the load-aware scorer to avoid the worker forever.
+        self._decay_thread = threading.Thread(
+            target=self._idle_decay_loop,
+            daemon=True,
+        )
+        self._decay_thread.start()
+
+    # ── idle decay ────────────────────────────────────────────────────────────
+
+    def _idle_decay_loop(self):
+        """
+        Every 2 seconds, if the worker has no active tasks, nudge gpu_utilization
+        and gpu_memory_used toward 0. This prevents the simulated stats from
+        staying artificially high between runs.
+        """
+        while True:
+            time.sleep(2)
+            with self.lock:
+                if self.active_tasks == 0:
+                    self.gpu_utilization = max(0, self.gpu_utilization - random.randint(2, 6))
+                    self.gpu_memory_used = max(0.0, self.gpu_memory_used - random.uniform(0.1, 0.5))
+
     # ── internal helpers ──────────────────────────────────────────────────────
 
     def _enter_task(self):
@@ -38,8 +62,8 @@ class GPUWorkerState:
 
     def _leave_task(self):
         with self.lock:
-            self.active_tasks    = max(0,  self.active_tasks    - 1)
-            self.gpu_utilization = max(0,  self.gpu_utilization - random.randint(3, 10))
+            self.active_tasks    = max(0,   self.active_tasks    - 1)
+            self.gpu_utilization = max(0,   self.gpu_utilization - random.randint(3, 10))
             self.gpu_memory_used = max(0.0, self.gpu_memory_used - random.uniform(0.3, 1.5))
 
     # ── process one inference request ─────────────────────────────────────────
