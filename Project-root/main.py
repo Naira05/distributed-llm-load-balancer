@@ -15,12 +15,12 @@ def main():
         {
             "id": "Mai",
             "url": "https://powwow-platypus-vice.ngrok-free.dev/",
-            "capacity": 4,
+            "capacity": 2,
         },
         {
             "id": "Naira",
             "url": "https://decidable-chubby-muppet.ngrok-free.dev/",
-            "capacity": 4,
+            "capacity": 2,
         },
         {
             "id": "Maryam",
