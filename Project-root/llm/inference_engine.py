@@ -134,7 +134,7 @@ def batch_infer(prompts: List[str]) -> List[Dict[str, Any]]:
 
 def stream_infer(
     prompt:     str,
-    max_tokens: int = 256,
+    max_tokens: int = 64,
     chunk_size: int = 5,
 ) -> Dict[str, Any]:
     """
