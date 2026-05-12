@@ -61,9 +61,9 @@ python main.py
 
 ```bash 
 ## windows command to run the gpu worker: 
-curl.exe -H "ngrok-skip-browser-warning: true" https://authToken/health
+curl.exe -H "ngrok-skip-browser-warning: true" https://your_url/health
 
 ## Macbook
-curl -H "ngrok-skip-browser-warning: true" https://authToken/health
+curl -H "ngrok-skip-browser-warning: true" https://your_url/health
 
 
