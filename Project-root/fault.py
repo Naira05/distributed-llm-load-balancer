@@ -7,12 +7,7 @@ log = logging.getLogger("Fault")
 
 
 def handle_failure(lb, failed_url: str):
-    """
-    Explicitly mark a worker URL as dead in the load balancer.
-    Only call this for hard failures (connection refused, timeout, etc).
-    Do NOT call this for soft HTTP failures (500, error status in JSON) —
-    the health-check thread will handle recovery automatically.
-    """
+
     log.warning(f"[Fault] Marking worker as failed: {failed_url}")
     with lb._lock:
         lb._alive[failed_url] = False
@@ -25,20 +20,7 @@ def with_fault_tolerance(
     strategy: str = "load_aware",
     max_retries: int = 3,
 ) -> dict:
-    """
-    Drop-in fault-tolerant dispatcher.
 
-    Delegates entirely to lb.dispatch() which already handles:
-      - worker selection via the chosen strategy
-      - per-attempt failover with exclude logic
-      - marking workers dead only on hard (connection) failures
-      - returning routed_to so the scheduler can attribute stats correctly
-
-    Previously this function duplicated dispatch() logic and called
-    handle_failure() on soft errors (non-success JSON responses), which
-    permanently blacklisted workers 3 & 4 after their first 500 — causing
-    all subsequent requests to pile onto workers 1 & 2 only.
-    """
     result = lb.dispatch(payload, strategy=strategy)
 
     if result.get("status") != "success":
@@ -59,13 +41,7 @@ def reassign_task(
     max_retries: int = 3,
     retry_delay: float = 1.0,
 ) -> dict:
-    """
-    Retry a request while explicitly excluding a known-bad worker.
-    Use this when you already know a specific worker failed and want
-    to route away from it — e.g. after a timeout on a specific URL.
-
-    For general fault-tolerant dispatch, prefer with_fault_tolerance().
-    """
+ 
     log.info(f"[Fault] Reassigning request {payload.get('id')} away from {failed_url}")
 
     strategy_fn = {

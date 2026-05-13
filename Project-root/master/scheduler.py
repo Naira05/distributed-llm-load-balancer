@@ -33,10 +33,8 @@ class Scheduler:
 
         log.info(f"Scheduler started | strategy={strategy}")
 
-    # ─────────────────────────────────────────────
-    # GPU STATUS (for debugging only)
-    # ─────────────────────────────────────────────
-
+   
+    # GPU STATUS 
     def fetch_worker_gpu(self, url):
         try:
             import requests
@@ -78,10 +76,7 @@ class Scheduler:
 
         print(f"{'─'*55}\n")
 
-    # ─────────────────────────────────────────────
     # MAIN ENTRY
-    # ─────────────────────────────────────────────
-
     def handle_request(self, request):
         return self.assign_task(request)
 
@@ -129,10 +124,8 @@ class Scheduler:
 
         return response
 
-    # ─────────────────────────────────────────────
+  
     # STATS
-    # ─────────────────────────────────────────────
-
     def get_stats(self):
 
         with self._lock:
@@ -148,10 +141,7 @@ class Scheduler:
                 "avg_latency_ms": round(avg * 1000, 2),
             }
 
-    # ─────────────────────────────────────────────
     # WORKER SUMMARY
-    # ─────────────────────────────────────────────
-
     def print_worker_summary(self):
 
         print(f"\n{'═'*55}")

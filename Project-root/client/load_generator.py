@@ -177,7 +177,3 @@ def run_load_test_sync(scheduler, num_users: int = 1000, concurrency_limit: int 
     return asyncio.run(generator.run_load_test(num_users))
 
 
-#Direct execution for standalone testing, allowing for testing of the client independently.
-#if __name__ == "__main__":
-    #print("[LoadGenerator] Standalone test mode — requires full system to be running.")
-    #print("[LoadGenerator] Use main.py for integrated testing.")

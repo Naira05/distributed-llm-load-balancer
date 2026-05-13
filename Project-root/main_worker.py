@@ -1,7 +1,7 @@
 # main_worker.py
 # Run this on each GPU machine to start the worker server
 
-from workers.gpu_worker_server import app  # adjust import to match your project
+from workers.gpu_worker_server import app 
 import uvicorn
 import argparse
 

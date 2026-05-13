@@ -7,15 +7,15 @@ import os
 
 from flask import Flask, request, jsonify
 
-# ── allow "from llm.inference_engine import infer" when running from project root
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from llm.inference_engine import infer
 
-# ── Flask app ─────────────────────────────────────────────────────────────────
+# ── Flask app
 
 app = Flask(__name__)
 
-# ── Worker state (one per process) ───────────────────────────────────────────
+# ── Worker state (one per process)
 
 class GPUWorkerState:
     def __init__(self, worker_id: int):
@@ -26,18 +26,13 @@ class GPUWorkerState:
         self.gpu_utilization = 0
         self.gpu_memory_used = 0.0
         self.lock            = threading.Lock()
-
-        # FIX: start a background thread that continuously decays GPU stats
-        # toward 0 when the worker is idle. Without this, the random walk in
-        # _enter_task/_leave_task drifts permanently high across runs, causing
-        # the load-aware scorer to avoid the worker forever.
         self._decay_thread = threading.Thread(
             target=self._idle_decay_loop,
             daemon=True,
         )
         self._decay_thread.start()
 
-    # ── idle decay ────────────────────────────────────────────────────────────
+    # ── idle decay
 
     def _idle_decay_loop(self):
         """
@@ -52,7 +47,7 @@ class GPUWorkerState:
                     self.gpu_utilization = max(0, self.gpu_utilization - random.randint(2, 6))
                     self.gpu_memory_used = max(0.0, self.gpu_memory_used - random.uniform(0.1, 0.5))
 
-    # ── internal helpers ──────────────────────────────────────────────────────
+    # ── internal helpers 
 
     def _enter_task(self):
         with self.lock:
@@ -66,7 +61,7 @@ class GPUWorkerState:
             self.gpu_utilization = max(0,   self.gpu_utilization - random.randint(3, 10))
             self.gpu_memory_used = max(0.0, self.gpu_memory_used - random.uniform(0.3, 1.5))
 
-    # ── process one inference request ─────────────────────────────────────────
+    # ── process one inference request 
 
     def process(self, payload: dict) -> dict:
         if self.failed:
@@ -134,7 +129,7 @@ class GPUWorkerState:
         finally:
             self._leave_task()
 
-    # ── load snapshot ─────────────────────────────────────────────────────────
+    # ── load snapshot 
 
     def get_load(self) -> dict:
         with self.lock:
@@ -152,7 +147,7 @@ class GPUWorkerState:
 _worker: GPUWorkerState = None
 
 
-# ── HTTP Endpoints ────────────────────────────────────────────────────────────
+# ── HTTP Endpoints 
 
 @app.route("/process", methods=["POST"])
 def process_request():

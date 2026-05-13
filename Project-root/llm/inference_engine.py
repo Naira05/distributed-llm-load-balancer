@@ -5,9 +5,9 @@ import ollama
 from dataclasses import dataclass
 from typing import Dict, Any, List
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
+# ── CONFIG 
 
-DEFAULT_MODEL = "tiny"   # must match: ollama pull tinyllama
+DEFAULT_MODEL = "tiny"  
 
 @dataclass
 class ModelSpec:
@@ -25,7 +25,7 @@ MODELS = {
     "large":  ModelSpec("large:latest",      10, 0.92, 8192, 500),
 }
 
-# ── ENGINE ────────────────────────────────────────────────────────────────────
+# ── ENGINE 
 
 class InferenceEngine:
     def __init__(self):
@@ -64,7 +64,7 @@ class InferenceEngine:
 
 _engine = InferenceEngine()
 
-# ── REAL OLLAMA INFERENCE ─────────────────────────────────────────────────────
+# ── REAL OLLAMA INFERENCE 
 
 def infer(
     prompt:      str,
@@ -78,7 +78,7 @@ def infer(
     """
     start      = time.time()
     request_id = str(uuid.uuid4())[:8]
-    model_name = MODELS[DEFAULT_MODEL].name          # "tinyllama"
+    model_name = MODELS[DEFAULT_MODEL].name         
     full_prompt = f"{context}\n\n{prompt}" if context else prompt
 
     try:
@@ -110,7 +110,6 @@ def infer(
 
     _engine._update(latency, tokens)
 
-    # ── THE BUG FIX: the original infer() forgot to return anything ──
     return {
         "request_id": request_id,
         "model":      model_name,
@@ -124,23 +123,16 @@ def infer(
         "status": status,
     }
 
-# ── BATCH INFERENCE ───────────────────────────────────────────────────────────
 
 def batch_infer(prompts: List[str]) -> List[Dict[str, Any]]:
-    """Process a list of prompts sequentially and return all results."""
     return [infer(p) for p in prompts]
 
-# ── STREAMING (word-by-word simulation over real output) ─────────────────────
-
+# ── STREAMING 
 def stream_infer(
     prompt:     str,
     max_tokens: int = 64,
     chunk_size: int = 5,
 ) -> Dict[str, Any]:
-    """
-    Calls real Ollama inference, then yields the response in word-chunks
-    to simulate streaming. Returns the full result plus a `chunks` list.
-    """
     start  = time.time()
     result = infer(prompt, max_tokens=max_tokens)
     text   = result.get("response", "")
@@ -149,7 +141,7 @@ def stream_infer(
     chunks = []
     for i in range(0, len(words), chunk_size):
         chunk = " ".join(words[i : i + chunk_size])
-        time.sleep(0.02)          # simulate network/streaming delay
+        time.sleep(0.02)        
         chunks.append(chunk)
 
     return {
@@ -161,7 +153,7 @@ def stream_infer(
         "status":     result.get("status", "success"),
     }
 
-# ── STATS / CONTROL ───────────────────────────────────────────────────────────
+# ── STATS / CONTROL 
 
 def get_stats() -> Dict[str, Any]:
     return _engine.get_stats()
